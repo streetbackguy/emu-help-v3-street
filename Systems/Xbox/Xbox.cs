@@ -1,22 +1,15 @@
-﻿using EmuHelp.HelperBase;
+using EmuHelp.HelperBase;
 using EmuHelp.Logging;
-using EmuHelp.Systems.Wii;
 using EmuHelp.Systems.Xbox;
 using EmuHelp.Systems.Xbox.Emulators;
 using JHelper.Common.MemoryUtils;
 using System;
 using System.Runtime.InteropServices;
 
-public class XB : Xbox { }
-
 public class Xbox : HelperBase
 {
-    // Xbox Memory Regions
-    // 0x30000000 - Heap Memory Region
-    // 0x40000000 - Allocated Data Memory Region
-    // 0x70000000 - the Stack Memory Region
-    // 0x82000000 - Basefiles Memory Region
-    // 0xC0000000 – 0xDFFFFFFF - Full 512mb Ram Memory Region
+    private const uint MINSIZE = 0x00010000;
+    private const uint MAXSIZE = 0x08000000;
 
     private XboxEmulator? Xboxemulator
     {
@@ -44,14 +37,23 @@ public class Xbox : HelperBase
 
     public override bool TryGetRealAddress(ulong address, out IntPtr realAddress)
     {
-        if (Xboxemulator is null)
-        {
-            realAddress = default;
-            return false;
-        }
+        realAddress = default;
 
-        realAddress = (IntPtr)((ulong)Xboxemulator.RamBase + address);
-        return true;
+        if (Xboxemulator is null)
+            return false;
+
+        IntPtr baseRam = Xboxemulator.RamBase;
+
+        if (baseRam == IntPtr.Zero)
+            return false;
+
+
+        if (address >= MINSIZE && address < MAXSIZE)
+        {
+            realAddress = (IntPtr)((ulong)baseRam + address);
+            return true;
+        }
+        return false;
     }
 
     internal override Emulator? AttachEmuClass()
@@ -64,65 +66,5 @@ public class Xbox : HelperBase
             "xemu.exe" => new Xemu(),
             _ => null,
         };
-    }
-
-    public override bool TryRead<T>(out T value, ulong address, params int[] offsets)
-    {
-        if (emulatorProcess is null || Xboxemulator is null || !ResolvePath(out IntPtr realAddress, address, offsets))
-        {
-            value = default;
-            return false;
-        }
-
-        return Xboxemulator.Endianness == Endianness.Big
-            ? emulatorProcess.ReadBigEndian(realAddress, out value)
-            : emulatorProcess.Read(realAddress, out value);
-    }
-
-    protected override bool ResolvePath(out IntPtr finalAddress, ulong baseAddress, params int[] offsets)
-    {
-        // Check if the emulator process is valid and retrieve the real address for the base address
-        if (emulatorProcess is null || Xboxemulator is null || !TryGetRealAddress(baseAddress, out finalAddress))
-        {
-            finalAddress = default;
-            return false;
-        }
-
-        foreach (int offset in offsets)
-        {
-            uint tempAddress;
-
-            if (!(Xboxemulator.Endianness == Endianness.Big
-                ? emulatorProcess.ReadBigEndian(finalAddress, out tempAddress)
-                : emulatorProcess.Read(finalAddress, out tempAddress))
-                || !TryGetRealAddress((ulong)(tempAddress + offset), out finalAddress))
-                return false;
-        }
-
-        return true;
-    }
-
-    public override unsafe bool TryReadArray<T>(out T[] value, uint size, ulong address, params int[] offsets)
-    {
-        if (emulatorProcess is null || Xboxemulator is null || !ResolvePath(out IntPtr realAddress, address, offsets))
-        {
-            value = new T[size];
-            return false;
-        }
-
-        using (ArrayRental<T> buffer = (int)size * sizeof(T) <= 1024 ? new(stackalloc T[(int)size]) : new((int)size))
-        {
-            if (!(Xboxemulator.Endianness == Endianness.Big
-                ? emulatorProcess.ReadArrayBigEndian(realAddress, buffer.Span)
-                : emulatorProcess.ReadArray(realAddress, buffer.Span)))
-            {
-                value = new T[(int)size];
-                return false;
-            }
-
-            value = buffer.Span.ToArray();
-        }
-
-        return true;
     }
 }
