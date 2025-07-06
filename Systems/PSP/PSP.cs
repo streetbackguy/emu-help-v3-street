@@ -71,8 +71,7 @@ public class PSP : HelperBase
 
         return emulatorProcess.ProcessName switch
         {
-            "PPSSPPWindows64.exe" or "PPSSPPWindows.exe" => new Ppsspp(),
-            "retroarch.exe" => new Retroarch(),
+            "PPSSPPWindows64.exe" or "PPSSPPWindows.exe" or "retroarch.exe" => new Ppsspp(),
             _ => null,
         };
     }
