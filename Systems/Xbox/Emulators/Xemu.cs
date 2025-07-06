@@ -1,52 +1,64 @@
-using System;
+using EmuHelp.HelperBase;
 using EmuHelp.Logging;
+using EmuHelp.Systems.Xbox;
+using EmuHelp.Systems.Xbox.Emulators;
 using JHelper.Common.MemoryUtils;
 using JHelper.Common.ProcessInterop;
+using System;
+using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace EmuHelp.Systems.Xbox.Emulators;
 
 internal class Xemu : XboxEmulator
 {
+    private IntPtr addr_base;
+
     internal Xemu()
         : base()
     {
-        Endianness = Endianness.Big;
         Log.Info("  => Attached to emulator: Xemu");
     }
 
-    public override bool FindRAM(ProcessMemory process)
+    public override bool FindRAM(ProcessMemory _process)
     {
-        if (!process.Is64Bit)
-            return false;
-
-        IntPtr addr = IntPtr.Zero;
-
-        // To identify the start of the emulated RAM, we can look for
-        // the PE header of the loaded .xex in memory.
-        for (int i = 32; i < 47; i++)
+        if (_process.Is64Bit)
         {
-            IntPtr tempAddr = (nint)1 << i;
-            IntPtr baseModule = (IntPtr)((nint)tempAddr + 0x82000000);
+            addr_base = _process.Scan(new MemoryScanPattern(3, "48 8B ?? ?? 45 89") { OnFound = addr => addr + 0x4 + _process.Read<int>(addr) });
+            if (addr_base == IntPtr.Zero)
+                return false;
 
-            if (process.Read(baseModule, out short val) && val == 0x5A4D
-                && process.Read(baseModule + 0x3C, out int e_lfanew)
-                && process.Read(baseModule + e_lfanew, out int pe) && pe == 0x4550)
-            { 
-                addr = tempAddr;
-                break;
-            }
+            if (!_process.Read(addr_base, out IntPtr ptr))
+                return false;
+            RamBase = ptr;
         }
-        if (addr == IntPtr.Zero)
-            return false;
+        else
+        {
+            addr_base = new MemoryScanPattern[]
+            {
+                new(2, "8B ?? ?? 45 89 ?? ?? 45 8D") { OnFound = _process.ReadPointer },
+            }
+            .Select(_process.Scan).FirstOrDefault(addr => addr != IntPtr.Zero);
 
-        RamBase = addr;
+            if (addr_base == IntPtr.Zero)
+                return false;
 
-        Log.Info($"  => RAM address mapped at 0x{RamBase.ToString("X")}");
+            if (!_process.Read(addr_base, out IntPtr ptr))
+                return false;
+            RamBase = ptr;
+        }
+
+        if (RamBase != IntPtr.Zero)
+            Log.Info($"  => RAM address found at 0x{RamBase.ToString("X")}");
         return true;
     }
 
     public override bool KeepAlive(ProcessMemory process)
     {
+        if (!process.Read(addr_base, out IntPtr ptr))
+            return false;
+        RamBase = ptr;
+
         return true;
     }
 }
